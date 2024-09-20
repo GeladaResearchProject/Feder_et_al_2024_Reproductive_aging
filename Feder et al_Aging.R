@@ -20,25 +20,35 @@ surv.gelada<-read.csv("Gelada_Surv.csv")
 
 ## PART 1: LIFE TABLE ANALYSES
 ## PLOTS
+color.palette<-c("#440154FF", "#21908CFF", "darkgray", "grey40")
+
 plot.fertility<-ggplot(data=life.table, aes(x=Age,y=mx, group=Population, color=Population)) + 
-  scale_color_viridis(begin=0, end=0.5,discrete=T) + ylab("Fertility") + xlab("Age (years)") +
+  scale_color_manual(values=color.palette) + ylab("Fertility\n(births/female/year)") + xlab("Age (years)") +
   theme(legend.position = "none") +
-  geom_line(lwd=1)
+  geom_line(lwd=1, aes(linetype=Population)) + scale_linetype_manual(values=c("Gelada - Simiens"="solid", "Chacma - Moremi"="solid","Yellow - Amboseli"="dotted", "Olive - Gombe"="dotted"))
 
 plot.survival<-ggplot(data=life.table, aes(x=Age,y=lx, group=Population, color=Population)) + 
-  scale_color_viridis(begin=0, end=0.5,discrete=T) + ylab("Survivorship") + xlab("Age (years)") + 
-  geom_line(lwd=1) + theme(legend.position =  c(0.7,0.9))
+  scale_color_manual(values=color.palette) + ylab("Survivorship") + xlab("Age (years)") + 
+  geom_line(lwd=1, aes(linetype=Population)) + scale_linetype_manual(values=c("Gelada - Simiens"="solid", "Chacma - Moremi"="solid","Yellow - Amboseli"="dotted", "Olive - Gombe"="dotted")) +
+  theme(legend.position =  c(0.65,0.85), legend.text = element_text(size=12), legend.key.width = unit(1,"cm"))
 
 plot.fertility + plot.survival + plot_annotation(tag_levels = "a")
 ggsave("Fertility_and_survival_chacma_v_geladas.jpg", units='cm', height=10, width=24)
 
 ## CALCULATE EXPECTED OFFSPRING
-sum(life.table$mx[life.table$Population=="Chacmas"]*life.table$lx[life.table$Population=="Chacmas"])
-sum(life.table$mx[life.table$Population=="Geladas"]*life.table$lx[life.table$Population=="Geladas"])
+sum(life.table$mx[life.table$Population=="Chacma - Moremi"]*life.table$lx[life.table$Population=="Chacma - Moremi"]/0.65)
+sum(life.table$mx[life.table$Population=="Gelada - Simiens"]*life.table$lx[life.table$Population=="Gelada - Simiens"])
+
+## CALCULATE EXPECTED OFFSPRING FOR THOSE THAT SURVIVE INFANCY
+sum(life.table$mx[life.table$Population=="Chacma - Moremi"]*life.table$lx[life.table$Population=="Chacma - Moremi"]/0.45)
+sum(life.table$mx[life.table$Population=="Gelada - Simiens"]*life.table$lx[life.table$Population=="Gelada - Simiens"]/0.69)
 
 ## RUN MODELS
 ## FERTILITY
-fertility.model<-brm(data=life.table[life.table$Age>3,], Births|trials(Entered)~poly(Age,2)*Population, 
+life.table$Births[is.na(life.table$Births)]<-round(life.table$mx[is.na(life.table$Births)]*life.table$Entered[is.na(life.table$Births)])
+
+library(brms)
+fertility.model<-brm(data=life.table, Births|trials(Entered)~poly(Age,2)*Population, 
             prior=c(
               prior(normal(0, 5), "Intercept"),
               prior(normal(0, 1), "b")),
@@ -69,6 +79,25 @@ print(summary(fit.pu, prob=c(0.025,0.975)), digits=2)
 fit.tg <- stan_surv(Surv(ibi.adj, ibi.censored) ~ tve(mom.z) + tve(mom.z.2) + (1|mom.id) + (1|year) + (1|unit), 
                     data=ibi.gelada, cores=2, chains=4, basehaz = 'ms')
 print(summary(fit.tg, prob=c(0.025,0.975)), digits=2)
+
+## PARITY MODELS
+fit.pu.parity <- stan_surv(Surv(ibi.adj, ibi.censored) ~ tve(mom.z) + parity + (1|mom.id) + (1|year), 
+                    data=ibi.chacma, cores=2, chains=4, basehaz = 'ms')
+print(summary(fit.pu.parity, prob=c(0.025,0.975)), digits=2)
+
+fit.tg.parity <- stan_surv(Surv(ibi.adj, ibi.censored) ~ tve(mom.z) + parity + (1|mom.id) + (1|year) + (1|unit), 
+                    data=ibi.gelada, cores=2, chains=4, basehaz = 'ms')
+print(summary(fit.tg.parity, prob=c(0.025,0.975)), digits=2)
+
+## COMPARE CHACMA MODELS
+loo1<-loo(fit.pu)
+loo2<-loo(fit.pu.parity)
+loo_compare(loo1, loo2)
+
+## COMPARE GELADA MODELS
+loo1<-loo(fit.tg)
+loo2<-loo(fit.tg.parity)
+loo_compare(loo1, loo2)
 
 ## MAKE HR DATASET FOR CHACMA
 try1<-plot(fit.pu, plotfun="tve",pars="mom.z")
@@ -144,11 +173,16 @@ age.effect <- dplyr::select(ibi.chacma, mom.id, year) %>%
   ))
 
 
-age.effect <- unnest(age.effect, preds) %>%
+age.effect1 <- unnest(age.effect, preds) %>%
   dplyr::select(-data)
 
-cb<-c("#FF7F00","#FDBF6F","gray","#A6CEE3", "#1F78B4")
-plot.pu1<-ggplot(age.effect,
+?hcl.colors
+blues<-RColorBrewer::brewer.pal(8,"Blues")
+cb<-c("#FF7F00",  "#FDBF6F" ,"gray","#A6CEE3", "#1F78B4")
+cb2<-c("#008837", "#A6DBA0", "gray", "#C2A5CF", "#7B3294")
+cb3<-c("#008837", "#A6DBA0", "gray", "#F1B6DA", "#D01C8B")
+blues<-blues[4:8]
+plot.pu1<-ggplot(age.effect1,
                  aes(
                    x=(time+tg.min)/365.25 , y=1-median,
                    color=age.cats
@@ -156,8 +190,8 @@ plot.pu1<-ggplot(age.effect,
   geom_vline(aes(xintercept=pu.min/365.25),lty=2) +
   labs(fill="age category") + theme(legend.position = "none") +
   annotate("rect", xmin=0, xmax=pu.min/365.25, ymin=0, ymax=1, alpha=0.5, fill="lightgray")+
-  geom_line(lwd=1.5,alpha=0.8)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
-  scale_color_manual(values = cb) + xlab("years since previous birth") + ylab("") + ggtitle("Chacma baboons") + ylab("proportion completing IBI") +
+  geom_line(lwd=1.25,alpha=1)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
+  scale_color_manual(values = cb) + xlab("years since previous birth") + ylab("") + ggtitle("Chacma baboons") + ylab("proportion closing IBI") +
   scale_y_continuous(expand=c(0,0), breaks=seq(0,1,0.5)) + scale_x_continuous(expand=c(0,0), limits=c(0,4),breaks = seq(0,4,2))
 plot.pu1
 
@@ -183,10 +217,10 @@ age.effect <- dplyr::select(ibi.gelada, mom.id, year,unit) %>%
   ))
 
 
-age.effect <- unnest(age.effect, preds) %>%
+age.effect2 <- unnest(age.effect, preds) %>%
   dplyr::select(-data)
 
-plot.tg1<-ggplot(age.effect,
+plot.tg1<-ggplot(age.effect2,
                  aes(
                    x=(time+tg.min)/365.25 , y=1-median,
                    color=age.cats
@@ -194,7 +228,7 @@ plot.tg1<-ggplot(age.effect,
   geom_vline(aes(xintercept=tg.min/365.25),lty=2) +
   labs(fill="age category") + theme(legend.position = "none") +
   annotate("rect", xmin=0, xmax=tg.min/365.25, ymin=0, ymax=1, alpha=0.5, fill="lightgray")+
-  geom_line(lwd=1.5,alpha=0.8)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
+  geom_line(lwd=1.25,alpha=1)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
   scale_color_manual(values = cb) + xlab("years since previous birth") + ylab("") + ggtitle("Geladas") +
   scale_y_continuous(expand=c(0,0), breaks=seq(0,1,0.5)) + scale_x_continuous(expand=c(0,0), limits=c(0,6),breaks = seq(0,6,2))
 plot.tg1
@@ -206,7 +240,7 @@ print(summary(fit.tg.TO, prob=c(0.025,0.975)), digits=2)
 
 fit.tg.NO.TO <- stan_surv(Surv(ibi.adj, ibi.censored) ~ tve(mom.z) + tve(mom.z.2) + (1|mom.id) + (1|unit) + (1|year), 
                        data=ibi.gelada[ibi.gelada$takeover==0,], cores=2, chains=4, basehaz = 'ms')
-print(summary(fit.tg.TO, prob=c(0.025,0.975)), digits=2)
+print(summary(fit.tg.NTO, prob=c(0.025,0.975)), digits=2)
 
 ## PART 3: INFANT SURVIVAL
 ## RUN MODELS
@@ -215,9 +249,32 @@ fit.pu2 <- stan_surv(Surv(inf.age.out, died) ~ mom.z + mom.z.2 + (1|mom.id) + (1
 print(summary(fit.pu2, prob=c(0.025,0.975)), digits=2)
 
 surv.gelada$inf.age.out[surv.gelada$inf.age.out==0]<-0.001
-fit.tg2 <- stan_surv(Surv(inf.age.out, died) ~ mom.z + mom.z.2 + (1|mom.id) + (1|Unit) + (1|year), 
+fit.tg2 <- stan_surv(Surv(inf.age.out, died) ~ mom.z + mom.z.2 + (1|mom.id) + (1|unit) + (1|year), 
                     data=surv.gelada, cores=2, chains=4, basehaz = 'ms')
 print(summary(fit.tg2, prob=c(0.025,0.975)), digits=2)
+
+## RUN MODELS -- PARITY
+surv.chacma$parity<-as.factor(surv.chacma$parity)
+surv.chacma$parity<-factor(surv.chacma$parity, levels=c("Primiparous","Multiparous"))
+
+fit.pu2.parity <- stan_surv(Surv(inf.age.out, died) ~ mom.z + parity + (1|mom.id) + (1|year), 
+                     data=surv.chacma, cores=2, chains=4, basehaz = 'ms')
+print(summary(fit.pu2.parity, prob=c(0.025,0.975)), digits=2)
+
+surv.gelada$inf.age.out[surv.gelada$inf.age.out==0]<-0.001
+fit.tg2.parity <- stan_surv(Surv(inf.age.out, died) ~ mom.z + parity + (1|mom.id) + (1|unit) + (1|year), 
+                     data=surv.gelada, cores=2, chains=4, basehaz = 'ms')
+print(summary(fit.tg2.parity, prob=c(0.025,0.975)), digits=2)
+
+## COMPARE CHACMA MODELS
+loo1<-loo(fit.pu2)
+loo2<-loo(fit.pu2.parity)
+loo_compare(loo1, loo2)
+
+## COMPARE GELADA MODELS
+loo1<-loo(fit.tg2)
+loo2<-loo(fit.tg2.parity)
+loo_compare(loo1, loo2)
 
 ## PLOT PROJECTIONS -- CHACMA BABOONS
 vals<-round(quantile(surv.chacma$mom.z, probs=c(.1,.3,.5,.7,.9)),2)
@@ -239,17 +296,17 @@ age.effect <- dplyr::select(surv.chacma, mom.id, year) %>%
     )
   ))
 
-age.effect <- unnest(age.effect, preds) %>%
+age.effect3 <- unnest(age.effect, preds) %>%
   dplyr::select(-data)
 
-levels(age.effect$age.cats)<-c("10th","30th","50th","70th","90th")
+levels(age.effect3$age.cats)<-c("10th","30th","50th","70th","90th")
 
-plot.pu2<-ggplot(age.effect,
+plot.pu2<-ggplot(age.effect3,
                  aes(
                    x=time, y=median,
                    color=age.cats
                  )) + labs(fill="age category") + labs(color="Maternal age\npercentile") +
-  geom_line(lwd=1.5,alpha=0.8)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
+  geom_line(lwd=1.25,alpha=0.8)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
   scale_color_manual(values=cb) +
   xlab("offspring age (years)") + ylab("proportion offspring surviving") + theme(legend.position = "none") +
   ylim(c(0.5, 1)) + scale_x_continuous(breaks=seq(0,1,0.5),labels=seq(0,1,0.5)) 
@@ -257,9 +314,9 @@ plot.pu2
 
 ## PLOT PROJECTIONS -- GELADAS
 vals<-round(quantile(surv.gelada$mom.z, probs=c(.1,.3,.5,.7,.9)),2)
-age.effect <- dplyr::select(surv.gelada, mom.id, year,Unit) %>%
+age.effect <- dplyr::select(surv.gelada, mom.id, year,unit) %>%
   tidyr::expand(mom.z=c(vals),
-                nesting(Unit, year,mom.id)) %>%
+                nesting(unit, year,mom.id)) %>%
   dplyr::mutate(id = 1:n(),
                 age.cats = as.factor(mom.z), mom.z.2=mom.z^2) %>%
   nest_legacy(-c(age.cats))  %>%
@@ -275,18 +332,20 @@ age.effect <- dplyr::select(surv.gelada, mom.id, year,Unit) %>%
     )
   ))
 
-age.effect <- unnest(age.effect, preds) %>%
+age.effect4 <- unnest(age.effect, preds) %>%
   dplyr::select(-data)
 
-levels(age.effect$age.cats)<-c("10th","30th","50th","70th","90th")
+levels(age.effect4$age.cats)<-c("10th","30th","50th","70th","90th")
 
-plot.tg2<-ggplot(age.effect,
+plot.tg2<-ggplot(age.effect4,
                  aes(
                    x=time, y=median,
                    color=age.cats
                  )) + labs(fill="age category") + labs(color="Maternal age\npercentile") +
-  geom_line(lwd=1.5,alpha=0.8)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
+  geom_line(lwd=1.25,alpha=0.8)  + theme(plot.title=element_text(face="bold", hjust=0.5), legend.title=element_text(face="bold")) +
   scale_color_manual(values=cb) +
+  annotate('text', label="young", x=0.6, size=5, y=0.98) +
+  annotate('text', label="old", x=0.55, size=5, y=0.81) +
   xlab("offspring age (years)") + ylab("") +
   ylim(c(0.5, 1)) + scale_x_continuous(breaks=seq(0,1,0.5),labels=seq(0,1,0.5)) 
 plot.tg2
@@ -295,25 +354,13 @@ ggsave("Repro_aging_chacmas_v_geladas.jpg", units='cm', height=20, width=24)
 
 ## PART 4: INFANT MORTALITY CAUSES
 
-## GELADAS FIRST
-gelada.mortality.summary1<-check.gelada[!(check.gelada$Censored==0 & check.gelada$End.Age<365),] %>% 
-  group_by(Age.Cat) %>%
-  dplyr::summarise(Total.Infants=n())
-
-gelada.mortality.summary2<-check.gelada[!(check.gelada$Censored==0 & check.gelada$End.Age<365),] %>% 
-  group_by(Age.Cat, Cause) %>%
-  dplyr::summarise(Infants=n())
-
-gelada.to.plot<-left_join(gelada.mortality.summary1, gelada.mortality.summary2, by="Age.Cat")
-gelada.to.plot$Proportion<-gelada.to.plot$Infants/gelada.to.plot$Total.Infants
-
-## CHACMAS SECOND
-
 ## VISUALIZE EFFECTS -- FIGURE 4
 ## CHACMAS
 chacma.mortality.summary1<-surv.chacma[!(surv.chacma$cause=="Censored"),] %>% 
   group_by(age.cat) %>%
   dplyr::summarise(Total.Infants=n())
+
+sum(chacma.mortality.summary1$Total.Infants)
 
 chacma.mortality.summary2<-surv.chacma[!(surv.chacma$cause=="Censored"),] %>% 
   group_by(age.cat, cause) %>%
@@ -336,6 +383,8 @@ plot1
 gelada.mortality.summary1<-surv.gelada[!(surv.gelada$cause=="Censored"),] %>% 
   group_by(age.cat) %>%
   dplyr::summarise(Total.Infants=n())
+
+sum(gelada.mortality.summary1$Total.Infants)
 
 gelada.mortality.summary2<-surv.gelada[!(surv.gelada$cause=="Censored"),] %>% 
   group_by(age.cat, cause) %>%
@@ -426,7 +475,7 @@ inj.gelada<-brm(data=gelada.causes, Injured ~ mom.z + mom.z.2 + (1|year),
                 family="bernoulli", chains=4, core=2)
 summary(inj.gelada)
 
-## INJURY OR ILLNESS
+## UNKNOWN
 unk.chacma<-brm(data=chacma.causes, Unknown ~ mom.z + mom.z.2 + (1|year), 
                 prior=c(
                   prior(normal(0, 5), "Intercept"),
@@ -440,5 +489,4 @@ unk.gelada<-brm(data=gelada.causes, Unknown ~ mom.z + mom.z.2 + (1|year),
                   prior(normal(0, 1), "b")),
                 family="bernoulli", chains=4, core=2)
 summary(unk.gelada)
-
 
